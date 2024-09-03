@@ -1,0 +1,1025 @@
+---
+title: "Deep Dive into US Hospitals and Healthcare"
+author: "Aarthi Thinakaran"
+output: html_document
+date: "2023-02-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#setwd('/Users/Hp/Desktop/Semester_2/Comp_Viz/Hackathon')
+```
+
+# INTRODUCTION AND PROBLEM STATEMENT
+
+In general, United States of America is one of the most talked about countries across the world. With its growing popularity, its performance as a country in different domains is always anticipated of and expectations on the USA keep going higher. The development of this country in every domain is improving exponentially. Be it technology, innovation, sports or entertainment, its presence among other countries is always something noteworthy. 
+
+The healthcare system in United States is a very complex network and there are over 6,000 hospitals in the United States, ranging in size from small rural facilities to large urban medical centers. Every hospital in the United States of America that accepts publicly insured patients (Medicaid or MediCare) is required to submit quality data, quarterly, to the Centers for Medicare & Medicaid Services (CMS). With this data, surveys and reports have been generated through the recent years, it has been found that US ranks last among the 11 most developed and industrialized countries. But what is surprising is the fact that US spends most of its gross domestic product (GDP) on health care than any other high-income country and yet, continues to rank last in healthcare quality. This has added fuel to the growing concern about the quality of American healthcare system and the high costs associated with it. Many patients and healthcare consumers are concerned about the quality of care they receive, and there is ongoing debate about how to improve the system and provide better care to patients. 
+
+The motivation for this project is to analyze the factors affecting healthcare quality and contribute our findings to understand the output gap between the US’s Spending and Quality in healthcare domain. According to the Commonwealth Fund report, healthcare quality is generally measure from across five major metrics namely accessibility, care process, administration efficiency, equity, and healthcare outcomes. We can use the General US Hospital Information dataset to compare and analyse the factors matching up to the standard used metrics to come up with observations in order to gain a better understanding of the healthcare prospect in the United States.This analysis will include identifying any hypothesis, correlations, and conclusions with respect to the different perspectives of healthcare provision through hospitals, as well as deliver the derived information through visual insights to make the communication effective. 
+
+
+```{r Libraries, include=FALSE}
+# loading all the libraries used in creating the visualizations that follows
+library(ggplot2)
+library(dplyr)
+library(magrittr)
+library(gridExtra)
+library(tidyverse)
+library(lubridate)
+library(RColorBrewer)
+library(ggfittext)
+library(treemapify)
+library(plotly)
+library(highcharter)
+library(treemap)
+
+#install.packages("highcharter")
+#install.packages("treemap")
+```
+
+# ABOUT THE DATASET
+
+The Hospital General Information dataset contains general information about all hospitals that have been registered with Medicare, including their addresses, type of hospital, and ownership structure. It also contains information about the quality of each hospital, in the form of an overall rating (1-5, where 5 is the best possible rating & 1 is the worst), and whether the hospital scored above, same as, or below the national average for a variety of measures. These measures include various patient satisfaction parameters like:
+
+-	Mortality national comparison
+-	Safety of care national comparison
+-	Readmission national comparison 
+-	Patient experience national comparison 
+-	Effectiveness national comparison
+-	Timeliness national comparison
+-	Efficient use of medical imaging national comparison. 
+
+The dataset also contains information about availability of emergency services in different hospitals.
+
+```{r Dataset, include=FALSE}
+# loading the Hospital General Information Dataset
+hospitals_df <- read.csv('HospInfo.csv')
+```
+
+Firstly, we clean our data.
+
+```{r Cleaning, echo=FALSE, include=FALSE}
+# Dimension of the dataset
+paste('The dimensions of the given Hospital dataset are ', dim(hospitals_df)[1] , ' rows and ', dim(hospitals_df)[2] , 'columns.')
+
+# Checking the sample of data
+head(hospitals_df,5)
+
+# We can see that the Location column is the combination of Address, City and State columns. So, 'Location' column is redundant column and hence it can be eliminated.
+head(hospitals_df[,c('Address','City','State','Location')],5)
+hospital_subset <- hospitals_df[colnames(hospitals_df)!="Location"]
+
+# Checking if there are any duplicate records of hospitals
+paste0('There are ' ,length(hospital_subset$Provider.ID) - length(unique(hospital_subset$Provider.ID)) , ' duplicate records in the Hospitals dataset.')
+
+# Checking for null values in all columns
+hospital_subset %>% 
+  summarise_all(funs(sum(is.na(.)))) %>%
+  pivot_longer(cols = Provider.ID:Efficient.use.of.medical.imaging.national.comparison.footnote,
+               names_to = "Column Names",
+               values_to = "Number of NULL Values")
+
+# Checking the number of empty strings in each column of the dataframe if any
+hospital_subset %>%
+  summarise_all(funs(sum(. == ""))) %>%
+  pivot_longer(cols = Provider.ID:Efficient.use.of.medical.imaging.national.comparison.footnote,
+               names_to = "Column Names",
+               values_to = "Number of Missing Values")
+
+# We can see that the empty strings in columns with "footnote" string are higher than the number of rows with actual values. These columns are just description about the other columns, hence they are neither very informational nor do they play a significant role in the analysis of hospitals data. Therefore these columns with "footnote" string in their column names can be removed from the dataframe.
+
+# Creating a subset of column names we want to delete and removing those from the original dataset
+cols_delete <- hospital_subset[ , grep(".footnote", colnames(hospital_subset))]
+hospitals_subset <- hospital_subset[!(colnames(hospital_subset) %in% colnames(cols_delete))]
+
+
+# Checking the number of values which are not available
+hospitals_subset %>%
+  summarise_all(funs(sum(. == "Not Available"))) %>%
+  pivot_longer(cols = Provider.ID:Efficient.use.of.medical.imaging.national.comparison,
+               names_to = "Column Names",
+              values_to = "Not Available Values")
+```
+
+# SECTION 1 - Investigation of healthcare system across USA
+
+## Question 1: 
+### How is the healthcare system distribution in general across the United States? How diverse is the distribution to satisfy different levels of people's need?
+
+```{r Question 1.1, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Chart - 1A
+
+# Creating a subset of dataframe for calculating the number of hospitals in each state
+by_states <- hospitals_subset %>% group_by(State) %>% 
+  summarise(Total = n()) 
+by_states$statename <- state.name[match(by_states$State, state.abb)] 
+by_states <- na.omit(by_states) %>% arrange(desc(Total))
+
+# Creating a high chart for the number of hospitals across states
+hc <- highchart() %>%
+  hc_add_series_map(usgeojson, by_states, name = "Number of Hospitals",
+                    value = "Total",joinBy = c("woename","statename"),
+                    dataLabels = list(enabled = TRUE, format = '{point.name}')) %>%
+                    hc_colorAxis(minColor = "#b4bde9",
+                                 maxColor = "#57236c",
+                                 type = "linear",
+                                 stops = list(c(0, "#b4bde9"),
+                                              c(1, "#57236c"))) %>%
+                    hc_mapNavigation(enabled = TRUE)  %>%   
+                    hc_add_theme(hc_theme_google()) %>%
+                    hc_credits(enabled = TRUE) %>%
+  hc_title(
+    text = "Fig.1 Number of Hospitals in each state across the US",
+    style = list(color = "black", fontWeight = "bold"),
+    size= 18,
+    margin = 20,
+    align = "center",
+    style = list(useHTML = TRUE)
+  ) %>%
+  hc_legend(
+    align = "left",
+    verticalAlign = "top",
+    layout = "vertical",
+    x = 0,
+    y = 100
+    ) 
+    
+hc
+```
+
+## Observations
+
+The highest number of hospitals is in Texas followed by California while the lowest number of hospitals being in Delaware. Although the number of hospitals being higher gives a positive impression on a state's healthcare system, we cannot conclude that it is true because the geographical area and population of a state also matter when it comes to the number of available hospitals. The population of Texas is around 29 Million while Delaware has a population of around 1 Million. It is evident looking from Figure 1 that the surface area of Texas state is higher when compared to Delaware.
+
+This leads us to the hypothesis that the higher number of hospitals may be due to the higher population or due to excess land availability. It could be also be because of higher needs from sicker population in general, or just having excessive resources. But,these are just the preliminary impressions.
+
+
+```{r Question 1.2, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Chart - 1B
+
+# Getting the top 2 and bottom 2 states by hospital count
+top_two <- head(by_states, n = 2)
+bottom_two <- tail(by_states, n = 2)
+
+# Getting the number of each hospital type in every state
+hosp_types_subset <- hospitals_subset %>%
+  group_by(State,Hospital.Type) %>%
+  summarise(Hospital_type_total = n())
+
+# Sub-setting the number of each hospital type for the two states with highest number of hospitals
+first <- filter(hosp_types_subset, State == top_two[1,"State"])
+second <- filter(hosp_types_subset, State == top_two[2,"State"])
+
+# Sub-setting the number of each hospital type for the two states with lowest number of hospitals
+second_last <- filter(hosp_types_subset, State == bottom_two[1,"State"])
+last <- filter(hosp_types_subset, State == bottom_two[1,"State"])
+
+# Defining a hex code for donut chart
+donut_colours<-c ("#C79DD7","#a398af","#DCDAFF") 
+
+# Calculating the portion and limit for distribution of hospitals in Texas
+first$fraction=first$Hospital_type_total/sum(first$Hospital_type_total) 
+first$max=cumsum(first$fraction) 
+first$min = c(0, head(first$max, n=-1)) 
+first$labelPosition <- (first$max + first$min) / 2
+first$label <- paste0("\n Total: ", first$Hospital_type_total)
+
+
+# Creating a donut chart for showing distribution of hospitals in Texas
+p1 <- ggplot(first, aes(ymax=max, ymin=min, xmax=4, xmin=3, fill = Hospital.Type))+
+  geom_rect() +
+  geom_label(x=4, aes(y=labelPosition, label=label), size = 2, show.legend = FALSE) +
+  scale_fill_manual(values=donut_colours) +
+  coord_polar(theta="y") + 
+  theme_void() +
+  xlim(c(2, 4)) +
+  labs(title = "Fig.1A Hospital Diversity in\n Texas",fill="Hospital Type") +
+  theme(plot.title = element_text(family = "Arial", color = "black",size = 10, face = "bold",hjust=0.5),
+            legend.title = element_text(family = "Arial", color = "black",size = 8), 
+            legend.text = element_text(family = "Arial", color = "black",size = 6))
+
+# Calculating the portion and limit for distribution of hospitals in California.
+second$fraction=second$Hospital_type_total/sum(second$Hospital_type_total) 
+second$max=cumsum(second$fraction) 
+second$min = c(0, head(second$max, n=-1)) 
+second$labelPosition <- (second$max + second$min) / 2
+second$label <- paste0("\n Total: ", second$Hospital_type_total)
+
+# Creating a donut chart for showing distribution of hospitals in California 
+p2 <- ggplot(second, aes(ymax=max, ymin=min, xmax=4, xmin=3, fill = Hospital.Type))+
+  geom_rect() +
+  geom_label(x=4, aes(y=labelPosition, label=label), size = 2, show.legend = FALSE) +
+  scale_fill_manual(values=donut_colours) +
+  coord_polar(theta="y") + 
+  theme_void() +
+  xlim(c(2, 4)) +
+  labs(title = "Fig.1B Hospital Diversity in \nCalifornia",fill="Hospital Type") +
+  theme(plot.title = element_text(family = "Arial", color = "black",size = 10, face = "bold",hjust=0.5),
+            legend.title = element_text(family = "Arial", color = "black",size = 8), 
+            legend.text = element_text(family = "Arial", color = "black",size = 6))
+
+# Calculating the portion and limit for distribution of hospitals in Rhode Island
+second_last$fraction=second_last$Hospital_type_total/sum(second_last$Hospital_type_total) 
+second_last$max=cumsum(second_last$fraction) 
+second_last$min = c(0, head(second_last$max, n=-1)) 
+second_last$labelPosition <- (second_last$max + second_last$min) / 2
+second_last$label <- paste0("\n Total: ", second_last$Hospital_type_total)
+
+
+# Creating a donut chart for showing distribution of hospitals in Rhode Island
+p4 <- ggplot(second_last, aes(ymax=max, ymin=min, xmax=4, xmin=3, fill = Hospital.Type))+
+  geom_rect() +
+  geom_label(x=4, aes(y=labelPosition, label=label), size = 2, show.legend = FALSE) +
+  scale_fill_manual(values=donut_colours) +
+  coord_polar(theta="y") + 
+  theme_void() +
+  xlim(c(2, 4)) +
+  labs(title = "Fig.1D Hospital Diversity in\n Rhode Island",fill="Hospital Type") +
+  theme(plot.title = element_text(family = "Arial", color = "black",size = 10, face = "bold",hjust=0.5),
+            legend.title = element_text(family = "Arial", color = "black",size = 8), 
+            legend.text = element_text(family = "Arial", color = "black",size = 6))
+
+# Calculating the portion and limit for distribution of hospitals in Delaware
+last$fraction=last$Hospital_type_total/sum(last$Hospital_type_total) 
+last$max=cumsum(last$fraction) 
+last$min = c(0, head(last$max, n=-1)) 
+last$labelPosition <- (last$max + last$min) / 2
+last$label <- paste0("\n Total: ", last$Hospital_type_total)
+
+
+# Creating a donut chart for showing distribution of hospitals in Delaware
+p3 <- ggplot(last, aes(ymax=max, ymin=min, xmax=4, xmin=3, fill = Hospital.Type))+
+  geom_rect() +
+  geom_label(x=4, aes(y=labelPosition, label=label), size = 2, show.legend = FALSE) +
+  scale_fill_manual(values=donut_colours) +
+  coord_polar(theta="y") + 
+  theme_void() +
+  xlim(c(2, 4)) +
+  labs(title = " Fig.1C Hospital Diversity in \nDelaware",fill="Hospital Type") +
+  theme(plot.title = element_text(family = "Arial", color = "black",size = 10, face = "bold",hjust=0.5),
+            legend.title = element_text(family = "Arial", color = "black",size = 8), 
+            legend.text = element_text(family = "Arial", color = "black",size = 6))
+
+grid.arrange(p1, p2, p3, p4, nrow = 2, ncol = 2)
+```
+
+## Observations
+
+From Figure 2A and 2B, we can infer that Texas and California have all the three hospital types namely Acute Care, Critical access and Childrens hospitals but Delaware and Rhode Island only have Acute Care hospitals. Families with children, older people or people who might need critical care in a timely manner may not prefer to reside in states like Delaware and Rhode Island.
+
+Even though our focus is not on the reasoning of the distribution of hospitals, we have to realize that the absence of few types of hospitals in Delaware and Rhode Island might have been because of the current population type and volume of residents there. Therefore, we cannot jump to the conclusion that Delaware and Rhode Island have bad healthcare systems.
+
+From the States we considered, we notice that with the increase in the number of hospitals, there exists a higher amount of diversity in the number of different types of hospitals although the proportion of this diversity is not that great.
+
+
+## Question 2: 
+### How is the diversity spread of these hospital types across other states? Is the trend of having higher number of hospitals leading to higher diversity true for all states? Are there any outliers that do not follow this?
+
+
+```{r Question 2 , echo=FALSE, warning=FALSE, message=FALSE}
+
+fig <- plot_ly(
+    x = hosp_types_subset$Hospital.Type, y = hosp_types_subset$State,
+    z = hosp_types_subset$Hospital_type_total,
+    colors = colorRamp(c("#a398af", "#57236c")),
+    type = "heatmap",
+    hoverinfo = "text",
+    text = ~paste("State: ",hosp_types_subset$State,"\n",
+                  "Hospital Type:",hosp_types_subset$Hospital.Type,"\n",
+                  "Count: ", hosp_types_subset$Hospital_type_total)) %>%
+  layout(title=list(text= "Fig.2 Interactive graph for hospitals of different types in each state",
+                    y = 0.98, x = 0.5, xanchor = "center", yanchor =  "top", 
+                    font = list(family = "Arial", color = "black",size = 18 ,bold = TRUE)),
+         colorscale = c("#a398af", "#57236c"),
+          xaxis=list(tickfont = list(family = "Arial", color = "black", size = 12),
+                    title = "Hospital Types",
+                    titlefont = list(family = "Arial", color = "black",size = 12),
+                    titleoffset = -0.5),
+          yaxis=list(tickfont = list(family = "Arial", color = "black", size = 6),
+                     title = "States", 
+                     titlefont = list(family = "Arial", color = "black",size = 12)),
+         legend=list(title=list(text="Number of Hospitals"),
+         font = list(family = "Arial", color = "black",size = 8,x = 0, y = 1,
+                     orientation = "h",borderwidth = 3))) %>%
+   config(displayModeBar = FALSE)
+
+fig
+
+```
+
+## Observations
+
+We can observe from Figure 2 that although the overall number of hospitals is higher in some states compared to others, they do not have Childrens hospitals or Critical Care hospitals while the latter have them. Examples of this would be Indiana(IN) and Hawaii(HI). In case of Indiana, we can clearly see that it has higher number of hospitals but it doesn't have any Childrens hospitals while Hawaii on the other hand, has a small number of hospitals but the diversity factor is fulfilled. Therefore, higher number of hospitals do not mean greater diversity. But it is also obvious from the figure that usually when states have higher number of hospitals there is a higher diversity in it's types. 
+
+There seems to exist a positive correlation between types of hospitals and the total number of hospitals but we can't 100% guarantee on it.
+
+
+# SECTION 2 - Impact of Hospital Ownerships on Healthcare services provided to patients
+
+## Question 3:
+### How good is the availability of hospitals in satisfying the needs of people from different income categories?
+
+```{r Question 3, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Chart-3
+
+# Subsetting the hospitals of top 4 and bottom 4 based on the various hospital owners.
+ownership_subset <- hospitals_subset %>%
+  filter(State=='TX' | State=='CA' | State=='FL' | State=='IL' | State=='DE' | State=='RI' | State=='VT'| State=='AK') %>%
+  group_by(State,Hospital.Ownership) %>%
+  summarise(Total=n()) %>%
+  mutate(Government_total = ifelse(str_detect(Hospital.Ownership,"Government"), Total, 0),
+         Voluntary_Non_Profit_total = ifelse(str_detect(Hospital.Ownership,"Voluntary non-profit"), Total, 0),
+         Physician_total = ifelse(str_detect(Hospital.Ownership,"Physician"), Total, 0),
+         Proprietary_total = ifelse(str_detect(Hospital.Ownership,"Proprietary"), Total, 0)) %>% 
+  summarize(Government_Owned = sum(Government_total),
+            Voluntary_Non_Profit = sum(Voluntary_Non_Profit_total),
+            Physician = sum(Physician_total),
+            Proprietary = sum(Proprietary_total)) %>%
+  pivot_longer(cols=c(Government_Owned: Proprietary),
+               names_to = "Hospital_Ownership",
+               values_to = "Hospital_Ownership_Count")
+
+# Creating a grouped bar chart to show the difference in different sections of hospital ownership count
+ggplot(data = ownership_subset, aes(x=State, y=Hospital_Ownership_Count, fill= Hospital_Ownership)) +
+  coord_flip() +
+  scale_fill_manual(values=c("#b4bde9","#a398af","#AF6AC9","#645065"),labels=c("Government Owned","Physician", "Proprietary","Voluntary Non-Profit")) +
+  geom_bar(stat="identity", position="dodge") +
+  labs(x = "US States", y = "Number of Hospitals", title = "    Fig.3 Diversity of hospitals across different Ownership types in Top 4 and Bottom 4 states", fill="Hospital Ownership") +
+  theme(plot.title = element_text(family = "Arial", color = "black",size = 10, face = "bold",hjust = 0.5),
+        axis.text.x = element_text(family = "Arial", color = "black",size = 6),
+        axis.text.y = element_text(family = "Arial", color = "black",size = 6),
+        axis.title.x = element_text(family = "Arial", color = "black",size = 8),
+        axis.title.y = element_text(family = "Arial", color = "black",size = 8),
+        legend.title = element_text(family = "Arial", color = "black",size = 8), 
+        legend.text = element_text(family = "Arial", color = "black",size = 6))
+
+```
+
+## Observations
+
+California has a median household income of 111,622 dollars. The graph shows that it has a good distribution of all ownership types. We can derive from here that when the income is higher there is a better distribution of healthcare. But when we compare this insight with Illinois, a state with a median income of $100,719 we notice that there are no physician owned hospitals in Illinois. Even though the other types are diverse it tells us that exceptions are still present.
+
+The graph show reveals that atleast 50% of the hospitals are Government-owned or Voluntary Non-Profit across all the 8 states which is a good sign as people from lower income groups can also afford medical treatment. The 2017 census shows that 4,853,434 people live below poverty line in California,  and the number of Government and Voluntary Non-Profit hospitals are around 260 in 2017. So, every Government/Voluntary Non-Profit hospital has to serve atleast 18,650 people which is quite a huge number for a single hospital.
+
+On the other hand,Vermont has a Median Household Income of $67,674. This reflects in the graph in form of less diversification. 
+Less number of Government hospital is a bad reflection of a state's healthcare as it might be caused due to bad insurance policies. Delaware, Rhode island and Vermont have no Government hospitals. 
+
+We can conclude that higher the number of hospitals, higher is the diversity and with higher number of Government hospitals in a state, better is the state in the provision of healthcare to diverse income communities of population.
+
+## Question 4:
+### How are the emergency services and EHR facilities in the hospitals across the country? Are these accessible enough by all categories income communities?
+
+
+```{r Question 4, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Chart-4
+
+# Subsetting hospitals with ehr and emr services and grouping with respect to Rating, Ownership to get the count in each combination
+emr_ehr <- hospitals_subset %>%
+  filter(Meets.criteria.for.meaningful.use.of.EHRs=="TRUE" & Emergency.Services=="TRUE") %>%
+  group_by(Hospital.overall.rating,Hospital.Ownership) %>%
+  filter(Hospital.overall.rating!="Not Available") %>%
+  summarise(Ownership_Rating_count = n())
+
+# Wrapping the axis label 
+wrapped_text <- str_wrap(as.character(emr_ehr$Hospital.Ownership),12)
+
+# Creating a bubble chart for hospital ratings with respect to Ownership
+fig <- plot_ly(
+  emr_ehr, x = ~Hospital.Ownership, y = ~Hospital.overall.rating,
+  hoverinfo = "text",
+  text = ~paste("Hospital Rating: ",Hospital.overall.rating ,"<br>Ownership:",Hospital.Ownership,
+                "<br>Count:", Ownership_Rating_count),
+  type = "scatter", mode = "markers",
+  size = ~Ownership_Rating_count,
+  marker = list(size = ~Ownership_Rating_count,
+                color = "#660066",line = list(width = 0),showscale=FALSE)) %>%
+  layout(title=list(text= "Fig.4 Rating of Hospitals with Emergency and EHR services across Ownership types",
+                    y = 0.98, x = 0.5, xanchor = "center", yanchor =  "top", 
+                    font = list(family = "Arial", color = "black",size = 18 ,bold = TRUE)),
+          xaxis=list(tickangle = 0,ticktext = wrapped_text,tickvals = emr_ehr$Hospital.Ownership,
+                    tickfont = list(family = "Arial", color = "black", size = 10),
+                    title = "Ownership of Hospitals",
+                    titlefont = list(family = "Arial", color = "black",size = 14),
+                    titleoffset = -0.5),
+          yaxis=list(tickfont = list(family = "Arial", color = "black", size = 12),
+                     title = "Hospital Rating", 
+                     titlefont = list(family = "Arial", color = "black",size = 14))) %>%
+   config(displayModeBar = FALSE)
+fig
+```
+## Observations
+
+Most of the times, we reach out to hospitals in cases of emergency. Everytime we go to a hospital, we need to provide a jist of our medical history before treatment. With the rise in amount of patients and diseases, EHR(Electronic Health Record) availability in the hospitals has become one of the basic requirements in the current century.EHR also allows the healthcare service provider to collect, store, manage and use this information to improve the patient treatment. 
+
+Generally a rating reflects the quality of service provided by the hospitals.
+From Figure 4, we can infer that the number of Voluntary non-profit- Private hospitals which has emergency and EHR services being rated '3' is the highest in count. But,there are only very few '5' rated hospitals which seems concerning. So, irrespective of the count, if a state doesn't have hospitals which has good rating, it will be considered as the state not having a good healthcare system. The graph also shows that the number of Government hospitals are less than the Voluntary non-profits. There are also 0 '5' rated Tribal hospitals which is a poor reflection of the country's healthcare.
+
+These information can be taken into account by the US government to increase the number of hospitals to satisfy needs of the sector where the healthcare service seems to be lacking.
+
+
+
+# SECTION 3 - How do various patient satisfaction factors affect a country's healthcare system? Does it need to be improved?
+
+## Question 5A: 
+Are the factors that people consider before taking up treatment upto the standards with respect national average?
+
+```{r Question 5A, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Chart - 5A
+
+# Creating a custom palette
+custom_colors <- c("#b4bde9","#a398af","#660066","#645065")
+
+#Creating a subset for Timeliness factor
+timeliness_subset <- hospitals_subset %>%
+  group_by(Timeliness.of.care.national.comparison) %>%
+  summarise(Timeliness_count = n()) 
+
+# Creating a subset for Effectiveness factor
+effectiveness_subset <- hospitals_subset %>%
+  group_by(Effectiveness.of.care.national.comparison) %>%
+  summarise(Effectiveness_count = n()) 
+
+# Creating a subset for Mortality factor
+mortality_subset <- hospitals_subset %>%
+  group_by(Mortality.national.comparison) %>%
+  summarise(Mortality_count = n()) 
+
+# Creating a subset for Safety of Care factor
+safety_subset <- hospitals_subset %>%
+  group_by(Safety.of.care.national.comparison) %>%
+  summarise(Safety_count = n()) 
+
+# Creating a subset for Patient Experience factor
+patient_experience_subset <- hospitals_subset %>%
+  group_by(Patient.experience.national.comparison) %>%
+  summarise(Patient_experience_count = n())
+
+# Creating a subset for Medical Imaging factor
+imaging_subset <- hospitals_subset %>%
+  group_by(Efficient.use.of.medical.imaging.national.comparison) %>%
+  summarise(Medical_imaging_count = n())
+
+# Combining all the subsets
+factors_subset <- cbind(timeliness_subset,effectiveness_subset,mortality_subset,
+                        safety_subset,patient_experience_subset,imaging_subset)
+
+# Create a dropdown button for the factors list
+updateMenus = list(
+    list(
+      type = "dropdown",
+      showactive = FALSE,
+      buttons = list(
+        list(method = "update",
+            args = list(list(x = list(factors_subset$Timeliness.of.care.national.comparison),
+                        y = list(factors_subset$Timeliness_count),
+                        color = list(factors_subset$Timeliness_count),
+                        type = list("bar"),
+                        yaxis = list("Hospitals with Timeliness"),
+                        text = list(paste("Timeliness:", factors_subset$Timeliness_count)))),
+             label = "Timeliness"),
+        list(method = "update",
+          args = list(list(x = list(factors_subset$Effectiveness.of.care.national.comparison),
+                      y = list(factors_subset$Effectiveness_count),
+                      color = list(factors_subset$Effectiveness_count),
+                      type = list("bar"),
+                    text = list(paste("Effectiveness:", factors_subset$Effectiveness_count)))),
+          label = "Effectiveness"),
+        list(method = "update",
+            args = list(list(x = list(factors_subset$Mortality.national.comparison),
+                        y = list(factors_subset$Mortality_count),
+                        color = list(factors_subset$Mortality_count),
+                        type = list("bar"),
+                        text = list(paste("Mortality:", factors_subset$Mortality_count)))),
+             label = "Mortality"),
+        list(method = "update",
+            args = list(list(x = list(factors_subset$Safety.of.care.national.comparison),
+                        y = list(factors_subset$Safety_count),
+                        color = list(factors_subset$Safety_count),
+                        type = list("bar"),
+                        text = list(paste("Safety of care:", factors_subset$Safety_count)))),
+             label = "Safety of care"),
+        list(method = "update",
+            args = list(list(x = list(factors_subset$Patient.experience.national.comparison),
+                        y = list(factors_subset$Patient_experience_count),
+                        color = list(factors_subset$Patient_experience_count),
+                        type = list("bar"),
+                        text = list(paste("Patient Experience:", factors_subset$Patient_experience_count)))),
+             label = "Patient experience"),
+        list(method = "update",
+            args = list(list(
+                        x = list(factors_subset$Efficient.use.of.medical.imaging.national.comparison),
+                        y = list(factors_subset$Medical_imaging_count),
+                        color = list(factors_subset$Medical_imaging_count),
+                        type = list("bar"),
+                        text = list(paste("Medical Imaging Experience:",factors_subset$Medical_imaging_count)))),
+             label = "Medical Imaging")
+       ),
+      direction = "down",
+      label = "Factors"
+      ))
+
+# Creating the wrapped axis label
+wrapped_text <- str_wrap(as.character(factors_subset$Timeliness.of.care.national.comparison),18)
+
+# Creating a plotly interactive chart
+plot_ly(data = factors_subset, x = str_wrap(factors_subset$Timeliness.of.care.national.comparison), 
+               y = factors_subset$Timeliness_count, 
+               #color = factors_subset$Timeliness_count,
+               type = "bar", 
+               marker = list(color = c("#b4bde9","#a398af","#660066","#645065")),
+               text = paste("Timeliness:", factors_subset$Timeliness_count),
+               hoverinfo = "text",
+               textposition = "none",
+               stackgroup = "one") %>% 
+  layout(title=list(text= "Fig.5 Distribution of Hospital Quality Factors",
+                    y = 0.98, x = 0.5, xanchor = "center", yanchor =  "top", 
+                    font = list(family = "Arial", color = "black",size = 18 ,bold = TRUE)),
+          xaxis=list(tickangle = 0,ticktext = wrapped_text,tickvals = factors_subset$Timeliness.of.care.national.comparison,
+                    tickfont = list(family = "Arial", color = "black", size = 12),
+                    title="Standards of factors which affect Hospital Rating",
+                    titlefont = list(family = "Arial", color = "black",size = 14),
+                    titleoffset = -0.5),
+          yaxis=list(tickfont = list(family = "Arial", color = "black", size = 12),
+                    title = "Number of Hospitals", 
+                    titlefont = list(family = "Arial", color = "black",size = 14)),
+         updatemenus = updateMenus) %>%
+   config(displayModeBar = FALSE)
+
+```
+
+## Observations
+
+Timeliness: Roughly 1200+ hospitals have longer wait times than the national average. This is a problem since longer waiting times are correlated with patient dissatisfaction. Having patients wait longer could also induce more stress and anxiety.
+Effectiveness: Very few hospitals function with very low or high effectiveness. Most of them are same as the national average.
+
+According to the latest Commonwealth report,although US ranked last in overall healthcare system performance,it has ranked #5 in one of healthcare quality metrics which is care process which relates to the Patient Experience factor from the data.Care process is a combination of measures of safe care,preventive care,coordinated care, and engagement and patient preferences. 
+From Figure 5, we can see that the Patient Experience factor has the highest amount of "Above the national Average" standard which conforms with the fact from the report because with better service,patient experience gets better.
+
+Similarly,Effectiveness factor seems to be the most poor with respect to national average which also coincides with the facts from the report that people in US have the lowest rates of continuity with the same doctor. This characteristics can easily drag down the effectiveness of a particular treatment before it a known fact that continuity is key for success of any kind of treatment.
+
+These key findings along with the common behavior and general characteristics of the people and also with the help of the report can help us come up with relationships to understand the correlation and causality between factors which affect Hospital Quality.
+
+
+```{r , echo=FALSE, warning=FALSE, message=FALSE}
+
+# Chart 
+
+state_timeliness <- hospitals_subset %>%
+  group_by(Hospital.overall.rating,Timeliness.of.care.national.comparison) %>%
+  summarise(timeliness_total=n()) %>%
+  arrange(Hospital.overall.rating) 
+
+state_effectiveness <- hospitals_subset %>%
+  group_by(Hospital.overall.rating,Effectiveness.of.care.national.comparison) %>%
+  summarise(effectiveness_total=n()) %>%
+  arrange(Hospital.overall.rating) 
+
+state_safety <- hospitals_subset %>%
+  group_by(Hospital.overall.rating,Safety.of.care.national.comparison) %>%
+  summarise(safety_total=n()) %>%
+  arrange(Hospital.overall.rating)
+
+state_patient_exp <- hospitals_subset %>%
+  group_by(Hospital.overall.rating,Patient.experience.national.comparison) %>%
+  summarise(patient_total=n()) %>%
+  arrange(Hospital.overall.rating)
+
+state_mortality <- hospitals_subset %>%
+  group_by(Hospital.overall.rating,Mortality.national.comparison) %>%
+  summarise(mortality_total=n()) %>%
+  arrange(Hospital.overall.rating)
+
+state_medical <- hospitals_subset %>%
+  group_by(Hospital.overall.rating,Efficient.use.of.medical.imaging.national.comparison) %>%
+  summarise(medical_total=n()) %>%
+  arrange(Hospital.overall.rating)
+
+wrapped_text <- str_wrap(as.character(state_timeliness$Hospital.overall.rating),3)
+
+timeliness_rating_chart <- state_timeliness %>%
+  group_by(Hospital.overall.rating) %>%
+  mutate(prop = timeliness_total/sum(timeliness_total)) %>%
+  plot_ly(x = ~Hospital.overall.rating,
+          y = ~prop,
+          color = ~Timeliness.of.care.national.comparison,
+          colors = c(
+            "Same as the national average" = "#b4bde9",
+            "Not Available" = "#a398af",
+            "Below the national average" = "#660066",
+            "Above the national average" = "#645065"),
+          textposition = "none",
+          hoverinfo = "text",
+          text = ~paste0(Timeliness.of.care.national.comparison, "\n","Proportion : ",round(prop,2),
+                         "\n","Value : ",timeliness_total),
+          type = "bar") %>%
+  layout(barmode = "stack",
+         annotations = list(x = 0.3 , y = 1.1, 
+                            text = "Fig.6A Timeliness", 
+                            showarrow = F, xref="paper",yref="paper"),
+                  xaxis=list(tickangle = 0,ticktext = wrapped_text,tickvals = state_timeliness$Hospital.overall.rating),
+                    tickfont = list(family = "Arial", color = "black", size = 10),
+                    titlefont = list(family = "Arial", color = "black",size = 14),
+         yaxis=list(tickfont = list(family = "Arial", color = "black", size = 10),
+                    title = "Proportion of Hospitals",showticklabels = TRUE,
+                    titlefont = list(family = "Arial", color = "black",size = 14)))
+
+effectiveness_rating_chart <- state_effectiveness %>%
+  group_by(Hospital.overall.rating) %>%
+  mutate(prop = effectiveness_total/sum(effectiveness_total)) %>%
+  plot_ly(x = ~Hospital.overall.rating,
+          y = ~prop,
+          color = ~Effectiveness.of.care.national.comparison,
+          colors = c(
+            "Same as the national average" = "#b4bde9",
+            "Not Available" = "#a398af",
+            "Below the national average" = "#660066",
+            "Above the national average" = "#645065"),
+          textposition = "none",
+          hoverinfo = "text",
+          text = ~paste0(Effectiveness.of.care.national.comparison, "\n","Proportion : ",round(prop,2),
+                         "\n","Value : ",effectiveness_total),
+          type = "bar",showlegend = F) %>%
+  layout(barmode = "stack", 
+         annotations = list(x = 0.75, y = 1.1, 
+                            text = "Fig.6B Effectiveness", 
+                            showarrow = F, xref="paper",yref="paper"),
+                  xaxis=list(tickangle = 0,ticktext = wrapped_text,tickvals = state_timeliness$Hospital.overall.rating),
+                    tickfont = list(family = "Arial", color = "black", size = 10),
+                    titlefont = list(family = "Arial", color = "black",size = 14),
+         yaxis=list(tickfont = list(family = "Arial", color = "black", size = 10),
+                    title = "Proportion of Hospitals",showticklabels = TRUE,
+                    titlefont = list(family = "Arial", color = "black",size = 14)))
+  
+safety_rating_chart <- state_safety %>%
+  group_by(Hospital.overall.rating) %>%
+  mutate(prop = safety_total/sum(safety_total)) %>%
+  plot_ly(x = ~Hospital.overall.rating,
+          y = ~prop,
+          color = ~Safety.of.care.national.comparison,
+          colors = c(
+            "Same as the national average" = "#b4bde9",
+            "Not Available" = "#a398af",
+            "Below the national average" = "#660066",
+            "Above the national average" = "#645065"),
+          textposition = "none",
+          hoverinfo = "text",
+          text = ~paste0(Safety.of.care.national.comparison, "\n","Proportion : ",round(prop,2),
+                         "\n","Value : ",safety_total),
+          type = "bar",showlegend = F) %>%
+  layout(barmode = "stack",annotations = list(x = 0.3 , y = 1.1, text = "Fig.6C Safeness", showarrow = F, xref="paper",yref="paper"),
+         yaxis=list(tickfont = list(family = "Arial", color = "black", size = 10),
+                    title = "Proportion of Hospitals",
+                    titlefont = list(family = "Arial", color = "black",size = 14)))
+
+patient_exp_rating_chart <- state_patient_exp %>%
+  group_by(Hospital.overall.rating) %>%
+  mutate(prop = patient_total/sum(patient_total)) %>%
+  plot_ly(x = ~Hospital.overall.rating,
+          y = ~prop,
+          color = ~Patient.experience.national.comparison,
+          colors = c(
+            "Same as the national average" = "#b4bde9",
+            "Not Available" = "#a398af",
+            "Below the national average" = "#660066",
+            "Above the national average" = "#645065"),
+          textposition = "none",
+          hoverinfo = "text",
+          text = ~paste0(Patient.experience.national.comparison, "\n","Proportion : ",round(prop,2),
+                         "\n","Value : ",patient_total),
+          type = "bar",showlegend = F) %>%
+  layout(barmode = "stack",annotations = list(x = 0.85 , y = 1.1, text = "Fig.6D Patient experience", showarrow = F, xref="paper",yref="paper"),
+         yaxis=list(tickfont = list(family = "Arial", color = "black", size = 10),
+                    title = "Proportion of Hospitals",showticklabels = TRUE,
+                    titlefont = list(family = "Arial", color = "black",size = 14)))
+
+mortality_rating_chart <- state_mortality %>%
+  group_by(Hospital.overall.rating) %>%
+  mutate(prop = mortality_total/sum(mortality_total)) %>%
+  plot_ly(x = ~Hospital.overall.rating,
+          y = ~prop,
+          color = ~Mortality.national.comparison,
+          colors = c(
+            "Same as the national average" = "#b4bde9",
+            "Not Available" = "#a398af",
+            "Below the national average" = "#660066",
+            "Above the national average" = "#645065"),
+          textposition = "none",
+          hoverinfo = "text",
+          text = ~paste0(Mortality.national.comparison, "\n","Proportion : ",round(prop,2),
+                         "\n","Value : ",mortality_total),
+          type = "bar",showlegend = F) %>%
+  layout(barmode = "stack",annotations = list(x = 0.3 , y = 0.95, text = "Fig.6E Mortality Rate", showarrow = F, xref="paper",yref="paper"),
+         yaxis=list(tickfont = list(family = "Arial", color = "black", size = 10),
+                    title = "Proportion of Hospitals",showticklabels = TRUE,
+                    titlefont = list(family = "Arial", color = "black",size = 14)))
+
+medical_rating_chart <- state_medical %>%
+  group_by(Hospital.overall.rating) %>%
+  mutate(prop = medical_total/sum(medical_total)) %>%
+  plot_ly(x = ~Hospital.overall.rating,
+          y = ~prop,
+          color = ~Efficient.use.of.medical.imaging.national.comparison,
+          colors = c(
+            "Same as the national average" = "#b4bde9",
+            "Not Available" = "#a398af",
+            "Below the national average" = "#660066",
+            "Above the national average" = "#645065"),
+          textposition = "none",
+          hoverinfo = "text",
+          text = ~paste0(Efficient.use.of.medical.imaging.national.comparison, "\n","Proportion : ",round(prop,2),
+                         "\n","Value : ",medical_total),
+          type = "bar",showlegend = F) %>%
+  layout(barmode = "stack",
+         annotations = list(x = 0.8 , y = 0.95, 
+                            text = "Fig.6F Medical Imaging", 
+                            showarrow = F, xref="paper",yref="paper"),
+         yaxis=list(tickfont = list(family = "Arial", color = "black", size = 10),
+                    title = "Proportion of Hospitals",showticklabels = TRUE,
+                    titlefont = list(family = "Arial", color = "black",size = 14)))%>%
+ config(displayModeBar = FALSE)
+
+plots <- list(timeliness_rating_chart,effectiveness_rating_chart,safety_rating_chart,
+              patient_exp_rating_chart,mortality_rating_chart,medical_rating_chart)
+
+subplot(plots, nrows = 3, shareX = TRUE)%>%
+  layout(title=list(text= "Fig.5B Patient Satisfaction Factors VS Hospital rating",
+                    y = 0.98, x = 0.5, xanchor = "center", yanchor =  "top", 
+                    font = list(family = "Arial", color = "black",size = 18 ,bold = TRUE)),
+         margin = list(l = 40, r = 40, t = 40, b = 40),
+         xaxis=list(tickangle = 0,ticktext = wrapped_text,tickvals = state_timeliness$Hospital.overall.rating),
+                    tickfont = list(family = "Arial", color = "black", size = 10),
+                    titlefont = list(family = "Arial", color = "black",size = 14),
+         yaxis=list(tickfont = list(family = "Arial", color = "black", size = 10),
+                    title = "Proportion of Hospitals",
+                    titlefont = list(family = "Arial", color = "black",size = 14)),
+         legend=list(title=list(text="Hospital Quality Factor levels"),
+         font = list(family = "Arial", color = "black",size = 10,x = 0, y = 1,
+                     orientation = "h",borderwidth = 3))) %>%
+   config(displayModeBar = FALSE)
+
+```
+## Observations
+
+Hospitals of all ratings have effectiveness of care same as the national average. This factor cannot be considered while choosing a hospital for treatment.
+Medical Imaging is also pretty much the same as national average for hospitals of all ratings.
+Mortality rate for hospitals rated 5 is comprised of majorly the same and above national average. It is pretty much the same as national average for other ratings. These 3 factors might not provide the means to choose a good hospital as they are pretty much the same across.
+Timeliness, Safety of care and Patient experience are distributed so a patient can consider these to choose a hospital.
+Not available data is pretty high for each factor. Hospitals with data not available imply poor information management which can ultimately lead to huge loss of impact in the country overall healthcare quality.
+Overall, we can conclude from the Figure 6 that all the factors seem to have higher amount of missing data than the available data.
+
+## Question 6:
+How much data about a hospitals factors is missing across different ownership types of hospitals? Are any ownership types more efficient than the others?
+
+```{r Question 7, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Chart - 7
+
+# filtering the not available data for each factor
+timeliness_na_subset <- hospitals_subset %>%
+  filter(Timeliness.of.care.national.comparison=="Not Available") %>%
+  group_by(Hospital.Ownership) %>%
+  summarise(Timeliness = n()*100/nrow(hospitals_subset)) %>%
+  arrange(Hospital.Ownership)
+
+effectivness_na_subset <- hospitals_subset %>%
+  filter(Effectiveness.of.care.national.comparison=="Not Available") %>%
+  group_by(Hospital.Ownership) %>%
+  summarise(Effectiveness = n()*100/nrow(hospitals_subset)) %>%
+  arrange(Hospital.Ownership)%>%
+  subset(select= c(Effectiveness))
+
+safety_na_subset <- hospitals_subset %>%
+  filter(Safety.of.care.national.comparison=="Not Available") %>%
+  group_by(Hospital.Ownership) %>%
+  summarise(Safety_of_care = n()*100/nrow(hospitals_subset)) %>%
+  arrange(Hospital.Ownership)%>%
+  subset(select= c(Safety_of_care))
+
+patient_na_subset <- hospitals_subset %>%
+  filter(Patient.experience.national.comparison=="Not Available") %>%
+  group_by(Hospital.Ownership) %>%
+  summarise(Patient_Experience = n()*100/nrow(hospitals_subset)) %>%
+  arrange(Hospital.Ownership)%>%
+  subset(select= c(Patient_Experience))
+
+mortality_na_subset <- hospitals_subset %>%
+  filter(Mortality.national.comparison=="Not Available") %>%
+  group_by(Hospital.Ownership) %>%
+  summarise(Mortality_Rate = n()*100/nrow(hospitals_subset)) %>%
+  arrange(Hospital.Ownership)%>%
+  subset(select= c(Mortality_Rate))
+
+medimg_na_subset <- hospitals_subset %>%
+  filter(Efficient.use.of.medical.imaging.national.comparison=="Not Available") %>%
+  group_by(Hospital.Ownership) %>%
+  summarise(Medical_Imaging = n()*100/nrow(hospitals_subset)) %>%
+  arrange(Hospital.Ownership)%>%
+  subset(select= c(Medical_Imaging))
+
+na_percent <- cbind(timeliness_na_subset,effectivness_na_subset,safety_na_subset,
+                    patient_na_subset,mortality_na_subset,medimg_na_subset)
+na_percent <- na_percent %>%
+  pivot_longer(cols=c(Timeliness:Medical_Imaging),
+               names_to = "Factors",
+               values_to = "Factors_na_percent")
+# Margin for btm padding for plotly
+m <- list(
+  b = 150,
+  pad = 4
+)
+
+# Creating the wrapped axis label
+wrapped <- str_wrap(as.character(na_percent$Factors),1)
+
+na_percent%>%
+  plot_ly(.,
+          x = ~Factors,
+          y = ~Factors_na_percent,
+          color = ~Hospital.Ownership,
+          type = "bar"
+  ) %>%
+  layout(title=list(text= "Fig.7 Proportion of Missing Information across different factors",
+                    y = 0.98, x = 0.5, xanchor = "center", yanchor =  "top", 
+                    font = list(family = "Arial", color = "black",size = 18 ,bold = TRUE)),
+          xaxis=list(tickfont = list(family = "Arial", color = "black", size = 10),
+                    title="Hospital Quality Factors",
+                    titlefont = list(family = "Arial", color = "black",size = 14),
+                    titleoffset = -0.5),
+          yaxis=list(tickfont = list(family = "Arial", color = "black", size = 12),
+                    title = "Number of Hospitals", 
+                    titlefont = list(family = "Arial", color = "black",size = 14)),
+           legend=list(title=list(text="Hospital Ownership Catgeories"),
+         font = list(family = "Arial", color = "black",size = 8,x = 0, y = 1,
+  orientation = "h",
+  borderwidth = 3)),
+  margin = m)  %>%
+  config(displayModeBar = FALSE)
+
+```
+
+## Observations
+
+Government hospitals in general seem to be having less missing information. This reflects their care for providing good healthcare service to patients and it makes them more reliable. 
+Most of the propriety hospitals also have large amounts of missing data. Given this information, we can conclude that Government hospitals are more efficient than Voluntary non-profits.
+
+This poor maintainence of data can actually be proved through the fact from Commonwealth report which shows that US ranked last among the most industrialized countries with respect to Administrative Efficiency.Although through the report we have verified this analysis holds,the report does not provide exact inform on how each factor is distributed across every US hospital across each state and county. So,US hospitals can use this analysis to make a decision on their improvement strategies and drill down further through this analysis to see on what area to improve the data availability not only to improve country's overall healthcare but also it can in turn lead to better patient experience through optimizing their treatments with respect to their medical history.
+
+## Question 7: Is there any relation between quantity and quality of hospitals?
+
+```{r Question 8, echo=FALSE, warning=FALSE, message=FALSE}
+# Chart - 8
+
+# Palette used for treemap
+tree_palette <-c("#DCBDEC","#DCDAFF","#b4bde9", "#a398af","#C79DD7","#9873AB","#AF6AC9",
+                      "#614e71","#660066","#57236c")
+
+state_pie_palette <- c("#a398af","#614e71")
+
+by_states_high <- hospitals_subset %>% group_by(State) %>% 
+  summarise(Total = n()) 
+by_states_high$statename <- state.name[match(by_states_high$State, state.abb)] 
+by_states_high <- na.omit(by_states_high) %>% 
+  arrange(desc(Total))%>%
+  head(n=10)
+
+by_states_low <- hospitals_subset %>% group_by(State) %>% 
+  summarise(Total = n()) 
+by_states_low$statename <- state.name[match(by_states_low$State, state.abb)] 
+by_states_low <- na.omit(by_states_low) %>% 
+  arrange(Total)%>%
+  head(n=10)
+
+lowest_rating <- hospitals_subset %>% 
+  filter(Hospital.overall.rating == 1 ) %>%
+  group_by(State) %>%
+  summarise(Lowest_rating_count = n())
+
+lowest_rating$statename <- state.name[match(lowest_rating$State, state.abb)] 
+
+lowest_rating <- na.omit(lowest_rating) %>% 
+  arrange(desc(Lowest_rating_count)) %>%
+  head(n=10)
+
+
+# Creating a dataframe for higher number of hospitals but poor performance
+high_worst_perform <- by_states_high[by_states_high$State %in% lowest_rating$State, ]
+
+high_worst_perform <- merge(x=high_worst_perform,y=lowest_rating, 
+             by=c("State","statename")) %>%
+  pivot_longer(cols=c(Total,Lowest_rating_count),
+               names_to ="Total_type",
+               values_to = "Count") %>% 
+  filter(State=="NY")
+
+# Computing the position of labels for higher number of hospitals but poor performance dataframe
+high_worst_perform <- high_worst_perform %>% 
+  arrange(desc(Total_type)) %>%
+  mutate(prop = Count / sum(high_worst_perform$Count) *100) %>%
+  mutate(ypos = cumsum(prop)- 0.5*prop )
+high_worst_perform$labels <- paste0(round(high_worst_perform$prop,2) ,"%")
+
+
+# Creating a pie chart for higher number of hospitals but poor performance dataframe
+g3 <- ggplot(high_worst_perform, aes(x="", y=prop, fill=Total_type)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  geom_text(aes(y = ypos, label = labels), color = "white", size=3)+
+  scale_fill_manual(values=state_pie_palette, labels=c("Lowest Rated Hospitals", "Total"))+
+  coord_polar("y") +
+  theme_void() +
+  labs(x = element_blank(), y = element_blank(),
+       title = "Fig.8A Percentage of Lowest Rated\n Hospitals in New York State ", fill= "Total type") +
+  theme(plot.title = element_text(family = "Arial", color = "black",size = 12, face = "bold"),
+        legend.title = element_text(family = "Arial", color = "black",size = 8), 
+        legend.text = element_text(family = "Arial", color = "black",size = 6),
+        legend.position="right",
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        panel.grid  = element_blank())
+
+#Creating a dataframe for lower number of hospitals but poor performance
+low_worst_perform <- by_states_low[by_states_low$State %in% lowest_rating$State, ]
+
+low_worst_perform <- merge(x=low_worst_perform,y=lowest_rating, 
+             by=c("State","statename"))%>%
+  pivot_longer(cols=c(Total,Lowest_rating_count),
+               names_to ="Total_type",
+               values_to = "Count") 
+
+# Computing the position of labels for lower number of hospitals but poor performance
+low_worst_perform <- low_worst_perform %>% 
+  arrange(desc(Total_type)) %>%
+  mutate(prop = Count / sum(low_worst_perform$Count) *100) %>%
+  mutate(ypos = cumsum(prop)- 0.5*prop ) 
+low_worst_perform$labels <- paste0(round(low_worst_perform$prop,2) ,"%")
+
+# Creating a piechart for lower number of hospitals but poor performance
+ g4 <- ggplot(low_worst_perform, aes(x="", y=prop, fill=Total_type)) +
+   geom_bar(stat="identity", width=1, color="white") +
+  geom_text(aes(y = ypos, label = labels), color = "white", size=3) +
+  coord_polar("y") +
+   scale_fill_manual(values=state_pie_palette, labels=c("Lowest Rated Hospitals", "Total")) +
+  theme_void() +
+  labs(x = "", y = "",
+       title = "Fig.8B Percentage of Lowest Rated\n Hospitals in Nevada State",fill= "Total type" ) +
+  theme(plot.title = element_text(family = "Arial", color = "black",size = 12, face = "bold"),
+        legend.title = element_text(family = "Arial", color = "black",size = 8), 
+        legend.text = element_text(family = "Arial", color = "black",size = 6),
+        legend.position="right",
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        panel.grid  = element_blank()) +
+  scale_fill_manual(values=state_pie_palette)
+
+
+# Treemap of States with highest number of hospitals 
+treemap(by_states_high,
+        index="statename",
+        vSize="Total",
+        type="index",
+        vColor="Total",
+        palette=tree_palette,
+        title="Fig.8A Top 10 states with highest number of hospitals",    
+        fontsize.title=12,
+        fontsize.labels=c(15,12),
+        border.col=c("white","white"),             
+        rect.col=by_states$Total)
+
+# Treemap of States with highest number of hospitals with '1' Hospital Rating
+treemap(lowest_rating,
+        index="statename",
+        vSize="Lowest_rating_count",
+        type="index",
+        vColor="Lowest_rating_count",
+        palette=tree_palette,
+        fontsize.labels=c(15,12),
+        border.col=c("white","white"),             
+        border.lwds=c(7,2),       
+        title="Fig.8B Top 10 states with lowest hospital rating",    
+        fontsize.title=12,
+        rect.col=lowest_rating$Lowest_rating_count) 
+
+#arrange piecharts in a 1x2 subplot layout
+grid.arrange(g3, g4, nrow = 1)
+
+```
+
+## Observations
+
+Figure 8.A shows the top 10 states with the highest number of hospitals. Figure 8.B shows the top 10 states with the highest number of 1 rated hospitals. California, New York, Florida, Illinois, Michigan, Pennsylvania and Georgia are among the states with most number of hospitals but three states among those also come under the top 5 states with most 1 star hospitals.
+On comparison Nevada has less number of hospitals but the percentage of under-quality hospitals are equal to the percentage of under-quality hospitals in New York, a state with the highest number of hospitals.
+Looking at these inferences we can determine that the quantity of hospitals do not determine the quality of healthcare in a state. 
+ 
+# CONCLUSION
+
+A recent poll conducted by Press-NORC Center for Public Affairs Research revealed that the public dissatisfaction with healthcare system of US is remarkably high with more than half of Americans saying it is not handled well and only 12% saying it is being handled well. Americans have similar views about health care for older adults. Surprisingly, the poll also revealed that the nearly 80% of the public find it hard to get access to quality healthcare. As shown by the visualizations, a large number of these hospitals are rated below average and do not meet the basic patient experience standards. This dataset proved to be extremely valuable in understanding the different perspective of US healthcare system and its performance. The country as a whole can use this to develop their healthcare system by comparing its statistics and identifying the areas of focus with these insights.
+
+# REFERENCES
+[1] https://www.commonwealthfund.org/publications/issue-briefs/2020/jan/us-health-care-global-perspective-2019  
+[2] https://en.as.com/latest_news/what-is-the-average-salary-in-california-household-income-by-city-and-county-n 
+[3] https://www.pbs.org/newshour/politics/majority-of-americans-unhappy-with-health-care-system-ap-norc-poll
